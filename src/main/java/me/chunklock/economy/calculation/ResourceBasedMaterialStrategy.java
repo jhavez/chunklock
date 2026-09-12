@@ -85,6 +85,16 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
      */
     private static final int SELECTION_WINDOW = 4;
 
+    /**
+     * Unlocked-chunk count past which accessibility filtering stops applying (#105).
+     *
+     * <p>Matches the first step of {@link #getMaxTierForProgression}, and must keep matching it.
+     * Reaching that step means the player has been priced in tier 4 stone, which cannot be mined
+     * without a pickaxe - so past this point the tool question has already been answered by the
+     * player's own progress, and asking it again only costs a scan.</p>
+     */
+    private static final int EARLY_GAME_CHUNK_LIMIT = 3;
+
     // Cost calculation runs on async threads (see AsyncCostCalculationService), so this
     // map and the deques inside it must both be safe for concurrent access.
     private final Map<UUID, Deque<Material>> recentSelections = new ConcurrentHashMap<>();
@@ -132,6 +142,10 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
             // been profiled and the baseline is warm. Reads the chunk's coordinates here, on
             // the calling thread, because calculate() runs async (AsyncCostCalculationService)
             // and touching Bukkit objects off the main thread is what #78 was.
+            // What the player can actually gather, resolved once and applied to whichever pool
+            // selection ends up using (#105).
+            MaterialAccessibility.ToolClass availableTool = availableToolFor(player, unlocked);
+
             List<TargetChunkCandidateSource.ScoredCandidate> scoredTarget = targetChunkScored(chunk, maxTier);
             boolean fromTargetChunk = !scoredTarget.isEmpty();
 
@@ -139,6 +153,9 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
             for (TargetChunkCandidateSource.ScoredCandidate candidate : scoredTarget) {
                 sortedCandidates.add(candidate.toResourceEntry());
             }
+
+            // Filter before selection so the distinctiveness ranking survives (#105).
+            sortedCandidates = filterByAccessibility(sortedCandidates, availableTool);
 
             // Rung 3: the player's owned chunks. Guarantees obtainability (#69), and is also
             // where warm-up sits until enough chunks are profiled.
@@ -160,7 +177,7 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
                     return fallbackToBiomeBased(player, biome, evaluation);
                 }
 
-                sortedCandidates = sortCandidates(obtainable);
+                sortedCandidates = sortCandidates(filterByAccessibility(obtainable, availableTool));
             }
 
             OwnedChunkScanner.ResourceEntry selected =
@@ -496,9 +513,19 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
             int unlocked = progressTracker.getUnlockedChunkCount(player.getUniqueId());
             int maxTier = getMaxTierForProgression(unlocked);
 
+            // Accessibility filtering must be applied here exactly as calculate() applies it
+            // (#105). A count that disagreed with what selection actually does would grey out a
+            // usable button, or charge for a re-roll that cannot move.
+            MaterialAccessibility.ToolClass availableTool = availableToolFor(player, unlocked);
+
             List<TargetChunkCandidateSource.ScoredCandidate> targetCandidates = targetChunkScored(chunk, maxTier);
             if (!targetCandidates.isEmpty()) {
-                return Math.min(SELECTION_WINDOW, targetCandidates.size());
+                List<OwnedChunkScanner.ResourceEntry> asEntries = new ArrayList<>(targetCandidates.size());
+                for (TargetChunkCandidateSource.ScoredCandidate candidate : targetCandidates) {
+                    asEntries.add(candidate.toResourceEntry());
+                }
+                return Math.min(SELECTION_WINDOW,
+                    filterByAccessibility(asEntries, availableTool).size());
             }
 
             List<OwnedChunkScanner.ResourceEntry> resources = scanner.scanPlayerResources(player);
@@ -506,17 +533,83 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
                 return 0;
             }
 
-            long obtainable = resources.stream()
+            List<OwnedChunkScanner.ResourceEntry> obtainable = resources.stream()
                 .filter(r -> r.tier() <= maxTier)
-                .count();
+                .toList();
 
-            return (int) Math.min(SELECTION_WINDOW, obtainable);
+            return (int) Math.min(SELECTION_WINDOW,
+                filterByAccessibility(obtainable, availableTool).size());
         } catch (Exception e) {
             // A failure here must not block the button. Reporting "more than one" leaves the
             // re-roll offered, which is the behaviour that existed before this check.
             plugin.getLogger().log(Level.FINE,
                 "Failed to count re-roll candidates for " + player.getName(), e);
             return SELECTION_WINDOW;
+        }
+    }
+
+    /**
+     * Drop candidates the player has no tool to gather (#105).
+     *
+     * <p>An icy mountain start priced every neighbouring chunk at 24 GRAVEL: present in the
+     * chunk, so resource-scan pricing was working as designed, but undiggable without a shovel
+     * and with no trees to craft one from. The tiers rank scarcity and never accessibility, so
+     * nothing in the selection path could notice.</p>
+     *
+     * <p><strong>Filtering happens before selection, never after.</strong> Selecting and then
+     * rejecting would discard the ranking {@link TargetChunkCandidateSource} just computed -
+     * the same shape as #86's original bug, where the metric was right and the pick ignored it.
+     * Narrowing the pool first keeps whatever ordering the caller established.</p>
+     *
+     * <p><strong>Returns the input unchanged when filtering would empty the pool.</strong> An
+     * unpayable price is a bad outcome; no price at all is a worse one, and this method cannot
+     * see the fallbacks available to its callers. Callers decide what an empty pool means -
+     * {@link #calculate} falls back to biome-based pricing, which has its own DIRT default.</p>
+     *
+     * @param available the strongest tool the player can plausibly obtain
+     */
+    static List<OwnedChunkScanner.ResourceEntry> filterByAccessibility(
+            List<OwnedChunkScanner.ResourceEntry> candidates,
+            MaterialAccessibility.ToolClass available) {
+        if (candidates == null || candidates.isEmpty()) {
+            return candidates;
+        }
+
+        List<OwnedChunkScanner.ResourceEntry> reachable = new ArrayList<>(candidates.size());
+        for (OwnedChunkScanner.ResourceEntry candidate : candidates) {
+            if (MaterialAccessibility.isReachable(available, candidate.material())) {
+                reachable.add(candidate);
+            }
+        }
+
+        // Every candidate is out of reach. Hand back the original rather than an empty list:
+        // the caller's fallback is better informed than a silent "no candidates" would be.
+        return reachable.isEmpty() ? candidates : reachable;
+    }
+
+    /**
+     * The strongest tool this player can plausibly obtain, from the chunks they own.
+     *
+     * <p>Skipped for players past the early game, where the question cannot change the answer:
+     * {@link #getMaxTierForProgression} only lifts past tier 3 at three unlocked chunks, and
+     * reaching that means mining stone, which means owning a pickaxe. Avoiding the call keeps
+     * the scan off the pricing path for established players, who are also the ones with the
+     * most owned chunks to scan.</p>
+     *
+     * <p>Returns PICKAXE - no restriction - on any failure. Pricing must never break because
+     * accessibility could not be determined, and an over-permissive answer restores today's
+     * behaviour rather than inventing a new one.</p>
+     */
+    private MaterialAccessibility.ToolClass availableToolFor(Player player, int unlockedChunks) {
+        if (unlockedChunks >= EARLY_GAME_CHUNK_LIMIT) {
+            return MaterialAccessibility.ToolClass.PICKAXE;
+        }
+        try {
+            return ToolAvailability.bestAvailable(scanner.scanPlayerResources(player), true);
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.FINE,
+                "Could not determine tool availability for " + player.getName(), e);
+            return MaterialAccessibility.ToolClass.PICKAXE;
         }
     }
 

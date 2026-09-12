@@ -160,8 +160,15 @@ public class StartingChunkService {
                 if (chunk == null) continue;
 
                 // OPTIMIZATION 3: Quick water check first (fastest check)
-                if (!ChunklockPlugin.getInstance().getChunkEvaluator().isChunkSuitableForSpawning(chunk)) {
+                ChunkEvaluator evaluator = ChunklockPlugin.getInstance().getChunkEvaluator();
+                if (!evaluator.isChunkSuitableForSpawning(chunk)) {
                     ChunklockPlugin.getInstance().getLogger().fine("Skipping water-dominated chunk at " + chunk.getX() + "," + chunk.getZ());
+                    continue;
+                }
+
+                // A low difficulty score does not mean the neighbourhood is payable (#105).
+                if (!evaluator.hasBareHandAccessibleMaterial(chunk)) {
+                    ChunklockPlugin.getInstance().getLogger().fine("Skipping chunk with nothing gatherable by hand at " + chunk.getX() + "," + chunk.getZ());
                     continue;
                 }
 

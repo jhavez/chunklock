@@ -143,10 +143,16 @@ public class EnhancedStartingChunkService {
                     Thread.sleep(10);
                 } catch (InterruptedException ignored) {}
                 
+                // A low difficulty score does not mean the start is playable (#105).
+                if (!ChunklockPlugin.getInstance().getChunkEvaluator()
+                        .hasBareHandAccessibleMaterial(chunk)) {
+                    continue;
+                }
+
                 // Evaluate chunk score
                 try {
                     var evaluation = chunkLockManager.evaluateChunk(player.getUniqueId(), chunk);
-                    
+
                     if (evaluation.score <= MAX_SCORE_THRESHOLD && evaluation.score < bestScore) {
                         bestScore = evaluation.score;
                         bestChunk = chunk;
@@ -197,9 +203,15 @@ public class EnhancedStartingChunkService {
                 Chunk chunk = world.getChunkAt(cx, cz);
                 if (chunk == null) continue;
 
+                // A low difficulty score does not mean the start is playable (#105).
+                if (!ChunklockPlugin.getInstance().getChunkEvaluator()
+                        .hasBareHandAccessibleMaterial(chunk)) {
+                    continue;
+                }
+
                 // Evaluate chunk score
                 var evaluation = chunkLockManager.evaluateChunk(player.getUniqueId(), chunk);
-                
+
                 // Check if this chunk meets our criteria
                 if (evaluation.score <= MAX_SCORE_THRESHOLD) {
                     validChunksFound++;
@@ -207,7 +219,7 @@ public class EnhancedStartingChunkService {
                         bestScore = evaluation.score;
                         bestChunk = chunk;
                     }
-                    
+
                     // If we find a really good chunk, stop searching
                     if (evaluation.score <= 10) {
                         break;

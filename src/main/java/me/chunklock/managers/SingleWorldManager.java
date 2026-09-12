@@ -548,8 +548,13 @@ public class SingleWorldManager {
     private boolean isValidStartingChunk(Chunk candidate) {
         // Check if chunk is suitable for spawning (not water-dominated)
         try {
-            if (!ChunklockPlugin.getInstance().getChunkEvaluator().isChunkSuitableForSpawning(candidate)) {
+            var evaluator = ChunklockPlugin.getInstance().getChunkEvaluator();
+            if (!evaluator.isChunkSuitableForSpawning(candidate)) {
                 return false; // Skip water-dominated chunks
+            }
+            // And that a player starting here can pay for something (#105).
+            if (!evaluator.hasBareHandAccessibleMaterial(candidate)) {
+                return false;
             }
         } catch (Exception e) {
             plugin.getLogger().log(java.util.logging.Level.FINE, "Error checking spawn suitability for chunk", e);

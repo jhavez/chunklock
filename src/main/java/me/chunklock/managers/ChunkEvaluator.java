@@ -2,6 +2,7 @@ package me.chunklock.managers;
 
 import org.bukkit.Chunk;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.block.Biome;
 import org.bukkit.block.Block;
 import me.chunklock.models.Difficulty;
@@ -324,6 +325,85 @@ public class ChunkEvaluator {
         } catch (Exception e) {
             logger.log(Level.WARNING, "Error checking chunk spawn suitability", e);
             return false; // If error, assume unsafe
+        }
+    }
+
+    /**
+     * How far below the surface {@link #hasBareHandAccessibleMaterial} looks.
+     *
+     * <p>Deep enough to find the dirt under a few blocks of snow, shallow enough that the check
+     * stays cheap on the main thread. A player with no tools is not reaching anything further
+     * down than this anyway.</p>
+     */
+    private static final int SURFACE_PROBE_DEPTH = 8;
+
+    /**
+     * Whether a starting chunk offers any material a player with nothing can gather (#105).
+     *
+     * <p>Spawn selection scores candidates on difficulty and takes a low one. Nothing checked
+     * that the chunk contains anything <em>payable from an empty inventory</em>, and those are
+     * not the same property: an icy mountain chunk scores as easy and offers only gravel, stone
+     * and ice. Gravel needs a shovel, a shovel needs wood, and there were no trees - so the
+     * reported start had no first move at all.</p>
+     *
+     * <p>Accessibility filtering in pricing (#105 task 3) makes a payable price <em>likely</em>;
+     * this makes the first one <em>certain</em>, by declining to start a player somewhere the
+     * filter would have nothing to offer.</p>
+     *
+     * <p><strong>Looks below the surface, but not far.</strong> The water check above samples
+     * the surface block only, which is right for its question and wrong for this one: an icy
+     * mountain has snow on top and the dirt that would save it a few blocks down, so a
+     * surface-only sample would reject perfectly good chunks. {@link #SURFACE_PROBE_DEPTH}
+     * bounds how deep it looks, because this runs on the main thread inside a search that tries
+     * up to a hundred candidates.</p>
+     *
+     * <p>Returns true on any error. A chunk that cannot be scanned must not be rejected on
+     * suspicion - the failure mode of this check returning false too often is that spawn search
+     * finds nothing at all and the player cannot start, which is worse than the softlock.</p>
+     */
+    public boolean hasBareHandAccessibleMaterial(Chunk chunk) {
+        try {
+            if (chunk == null || chunk.getWorld() == null) {
+                return true; // Cannot tell; do not block spawning on it.
+            }
+
+            World world = chunk.getWorld();
+            int minY = world.getMinHeight();
+
+            // Sampled from the surface down rather than over the full column height, and only
+            // to SURFACE_PROBE_DEPTH. This check runs on the main thread inside a spawn search
+            // that tries up to a hundred candidates, so a full-column scan of every one would
+            // be tens of thousands of block reads per rejected chunk - and the rejection case
+            // is exactly the cold biome this exists to catch. Anything a new player can reach
+            // without mining is within a few blocks of the surface anyway.
+            for (int x = 0; x < 16; x += 4) {
+                for (int z = 0; z < 16; z += 4) {
+                    int worldX = chunk.getX() * 16 + x;
+                    int worldZ = chunk.getZ() * 16 + z;
+
+                    int surfaceY = world.getHighestBlockYAt(worldX, worldZ);
+                    int floor = Math.max(minY, surfaceY - SURFACE_PROBE_DEPTH);
+
+                    for (int y = surfaceY; y >= floor; y--) {
+                        Material mat = world.getBlockAt(worldX, y, worldZ).getType();
+                        if (mat == Material.AIR || mat == Material.CAVE_AIR || mat == Material.VOID_AIR) {
+                            continue;
+                        }
+                        if (me.chunklock.economy.calculation.OwnedChunkScanner.isHarvestable(mat)
+                            && me.chunklock.economy.calculation.MaterialAccessibility.needsNoTool(mat)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            logger.fine("Chunk " + chunk.getX() + "," + chunk.getZ()
+                + " has no bare-hand gatherable material - unsuitable as a starting chunk (#105)");
+            return false;
+
+        } catch (Exception e) {
+            logger.log(Level.FINE, "Error checking starting-chunk accessibility", e);
+            return true; // Never block spawning because the check itself failed.
         }
     }
 

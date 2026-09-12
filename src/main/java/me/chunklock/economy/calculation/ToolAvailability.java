@@ -34,8 +34,8 @@ import java.util.List;
  * asymmetry is load-bearing: gravel in an owned chunk means gravel lying there <em>undug</em>, so
  * it is the softlock rather than evidence against it. The first draft of this class inferred
  * "owns gravel, therefore owns a shovel" and would have declared the reported icy-mountain start
- * perfectly fine - the same false all-clear that
- * {@code ProgressionValidationService} gave by listing GRAVEL as basic-obtainable.</p>
+ * perfectly fine - the same false all-clear the deleted {@code ProgressionValidationService} gave
+ * by listing GRAVEL among its basic-obtainable materials.</p>
  *
  * <p>Only a block worldgen cannot place is real evidence. Cobblestone is the clean case: worldgen
  * places stone, and cobble is what a pickaxe turns it into.</p>

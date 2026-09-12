@@ -55,7 +55,6 @@ public class ChunklockPlugin extends JavaPlugin implements Listener {
     private me.chunklock.hologram.HologramService hologramService;
     private StartingChunkService startingChunkService;
     private me.chunklock.services.ChunkPreAllocationService chunkPreAllocationService; // NEW: Performance optimization
-    private me.chunklock.services.ProgressionValidationService progressionValidationService;
     
     // Listeners
     private PlayerListener playerListener;
@@ -371,7 +370,6 @@ public class ChunklockPlugin extends JavaPlugin implements Listener {
             this.startingChunkService = new StartingChunkService(chunkLockManager, playerDataManager);
             this.startingChunkService.setPreAllocationService(chunkPreAllocationService);
             
-            this.progressionValidationService = new me.chunklock.services.ProgressionValidationService(this);
             this.unlockGui = new UnlockGui(this, chunkLockManager, biomeUnlockRegistry, progressTracker, teamManager, economyManager);
             this.hologramService = me.chunklock.hologram.HologramService.create(chunkLockManager, biomeUnlockRegistry, worldManager);
             this.playerListener = new PlayerListener(chunkLockManager, progressTracker, playerDataManager, unlockGui);
@@ -804,11 +802,6 @@ public class ChunklockPlugin extends JavaPlugin implements Listener {
         return biomeUnlockRegistry;
     }
 
-    public me.chunklock.services.ProgressionValidationService getProgressionValidationService() {
-        if (progressionValidationService == null) throw new IllegalStateException("ProgressionValidationService not initialized");
-        return progressionValidationService;
-    }
-    
     public DependencyChecker getDependencyChecker() {
         if (dependencyChecker == null) throw new IllegalStateException("DependencyChecker not initialized");
         return dependencyChecker;

@@ -208,6 +208,18 @@ public class OwnedChunkScanner {
     }
 
     /**
+     * Every material this scanner will price against, as an immutable set.
+     *
+     * <p>Exposed so {@link MaterialAccessibility} can be checked for <em>completeness</em>
+     * against this set rather than against a hand-maintained copy of it. A material added here
+     * with no accessibility entry is a potential softlock (#105), and the only way to catch that
+     * at build time is to enumerate the real set.</p>
+     */
+    public static Set<Material> harvestableMaterials() {
+        return HARVESTABLE_MATERIALS;
+    }
+
+    /**
      * Get the tier of a material.
      */
     public static int getMaterialTier(Material material) {

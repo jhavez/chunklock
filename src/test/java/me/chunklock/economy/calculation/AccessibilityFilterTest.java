@@ -11,7 +11,6 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -109,16 +108,24 @@ class AccessibilityFilterTest {
     // ---- Degenerate cases ----------------------------------------------------------------
 
     /**
-     * The case that decides whether this filter can make things worse.
+     * The case that decides whether this filter can make things worse - <strong>reversed after
+     * the beach softlock</strong>.
      *
-     * <p>If every candidate is unreachable, returning empty would leave selection with nothing
-     * and callers guessing. Handing back the original list keeps today's behaviour - a possibly
-     * unpayable price - which is bad, but strictly better than no price at all. The callers own
-     * the fallback decision.</p>
+     * <p>This test used to assert the opposite: that an entirely unreachable pool was passed
+     * through unchanged, on the reasoning that an awkward price beats no price and that callers
+     * owned the fallback decision. <strong>Both halves were wrong.</strong></p>
+     *
+     * <p>A beach profiles as sand, clay, gravel and stone - every one tool-gated. Filtering
+     * emptied the pool, the unfiltered list came back, and selection priced the chunk in
+     * <strong>clay</strong> for a player with no shovel and no trees: the reported #105 softlock
+     * in a biome the original fix never covered. And the "caller decides" premise did not hold -
+     * the target-chunk path took this list straight to selection with no fallback at all.</p>
+     *
+     * <p>Returning empty is what lets both call sites route to biome-based pricing instead.</p>
      */
     @Test
-    @DisplayName("an entirely unreachable pool is passed through, not emptied")
-    void unreachablePoolIsPassedThrough() {
+    @DisplayName("an entirely unreachable pool comes back empty, so callers can fall back")
+    void unreachablePoolIsEmptied() {
         List<OwnedChunkScanner.ResourceEntry> allGated = List.of(
             entry(Material.GRAVEL, 900, 1),
             entry(Material.STONE, 4000, 4));
@@ -126,8 +133,27 @@ class AccessibilityFilterTest {
         List<OwnedChunkScanner.ResourceEntry> result =
             ResourceBasedMaterialStrategy.filterByAccessibility(allGated, ToolClass.NONE);
 
-        assertSame(allGated, result,
-            "no price at all is worse than an awkward one; the caller decides what to do");
+        assertTrue(result.isEmpty(),
+            "passing the gated pool through is what priced a beach in clay - an empty result is "
+                + "the signal that makes the biome-based fallback reachable");
+    }
+
+    /**
+     * The beach itself, as the filter sees it. Named because a regression here is the exact
+     * live-test failure, not an abstract property.
+     */
+    @Test
+    @DisplayName("a beach chunk offers a bare-handed player nothing")
+    void beachChunkIsEntirelyGated() {
+        List<OwnedChunkScanner.ResourceEntry> beach = List.of(
+            entry(Material.SAND, 2400, 1),
+            entry(Material.CLAY, 180, 1),
+            entry(Material.GRAVEL, 320, 1),
+            entry(Material.STONE, 1800, 4));
+
+        assertTrue(ResourceBasedMaterialStrategy.filterByAccessibility(beach, ToolClass.NONE).isEmpty(),
+            "sand, clay and gravel are shovel work and stone needs a pickaxe - a beach start "
+                + "with no trees has no reachable material, which is why it must fall back");
     }
 
     @Test

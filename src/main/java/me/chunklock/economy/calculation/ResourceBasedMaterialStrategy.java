@@ -157,6 +157,14 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
             // Filter before selection so the distinctiveness ranking survives (#105).
             sortedCandidates = filterByAccessibility(sortedCandidates, availableTool);
 
+            // Nothing in the target chunk is gatherable with what this player can obtain. This
+            // path has no other fallback, and it is the one that priced a beach in clay (#105).
+            if (fromTargetChunk && sortedCandidates.isEmpty()) {
+                plugin.getLogger().fine("Target chunk offers nothing reachable with " + availableTool
+                    + " for " + player.getName() + ", falling back to biome-based");
+                return fallbackToBiomeBased(player, biome, evaluation);
+            }
+
             // Rung 3: the player's owned chunks. Guarantees obtainability (#69), and is also
             // where warm-up sits until enough chunks are profiled.
             if (!fromTargetChunk) {
@@ -178,6 +186,13 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
                 }
 
                 sortedCandidates = sortCandidates(filterByAccessibility(obtainable, availableTool));
+
+                // The player owns chunks, but nothing in them is reachable bare-handed.
+                if (sortedCandidates.isEmpty()) {
+                    plugin.getLogger().fine("No owned resource reachable with " + availableTool
+                        + " for " + player.getName() + ", falling back to biome-based");
+                    return fallbackToBiomeBased(player, biome, evaluation);
+                }
             }
 
             OwnedChunkScanner.ResourceEntry selected =
@@ -537,7 +552,7 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
                 .filter(r -> r.tier() <= maxTier)
                 .toList();
 
-            return (int) Math.min(SELECTION_WINDOW,
+            return Math.min(SELECTION_WINDOW,
                 filterByAccessibility(obtainable, availableTool).size());
         } catch (Exception e) {
             // A failure here must not block the button. Reporting "more than one" leaves the
@@ -561,10 +576,18 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
      * the same shape as #86's original bug, where the metric was right and the pick ignored it.
      * Narrowing the pool first keeps whatever ordering the caller established.</p>
      *
-     * <p><strong>Returns the input unchanged when filtering would empty the pool.</strong> An
-     * unpayable price is a bad outcome; no price at all is a worse one, and this method cannot
-     * see the fallbacks available to its callers. Callers decide what an empty pool means -
-     * {@link #calculate} falls back to biome-based pricing, which has its own DIRT default.</p>
+     * <p><strong>Returns an empty list when nothing is reachable, and that is load-bearing.</strong>
+     * An earlier version returned the <em>unfiltered</em> candidates instead, reasoning that an
+     * unpayable price beats no price and that callers had better-informed fallbacks. That
+     * reintroduced the bug one biome over: a beach profiles as sand, clay, gravel and stone -
+     * every one tool-gated - so filtering emptied the pool, the unfiltered list came back, and
+     * selection priced the chunk in <strong>clay</strong> for a player with no shovel and no
+     * trees. The "caller has a fallback" premise was also false on the target-chunk path, which
+     * took the returned list straight to selection.</p>
+     *
+     * <p>So an empty return now means exactly what it says, and <em>both</em> call sites in
+     * {@link #calculate} route to {@link #fallbackToBiomeBased}, whose entries are themselves
+     * accessibility-checked and which bottoms out at {@code (DIRT, 1)}.</p>
      *
      * @param available the strongest tool the player can plausibly obtain
      */
@@ -582,9 +605,7 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
             }
         }
 
-        // Every candidate is out of reach. Hand back the original rather than an empty list:
-        // the caller's fallback is better informed than a silent "no candidates" would be.
-        return reachable.isEmpty() ? candidates : reachable;
+        return reachable;
     }
 
     /**
@@ -846,16 +867,43 @@ public class ResourceBasedMaterialStrategy implements CostCalculationStrategy {
                 adjusted.add(req);
             }
         }
-        ItemRequirement selectedRequirement = selectPrimaryRequirement(adjusted);
+
+        // This is now the destination when resource-scan pricing finds nothing reachable, so it
+        // has to answer the same accessibility question rather than reintroducing the problem
+        // from a different source (#105).
+        int unlocked = progressTracker.getUnlockedChunkCount(player.getUniqueId());
+        MaterialAccessibility.ToolClass availableTool = availableToolFor(player, unlocked);
+
+        ItemRequirement selectedRequirement = selectPrimaryRequirement(adjusted, availableTool);
         return new EconomyManager.PaymentRequirement(java.util.List.of(selectedRequirement));
     }
 
-    private ItemRequirement selectPrimaryRequirement(List<ItemRequirement> requirements) {
+    /**
+     * Pick the requirement to charge, preferring one the player can actually gather (#105).
+     *
+     * <p>This used to return the first vanilla requirement in file order, which for a beach
+     * ({@code SAND: 20}, {@code SEAGRASS: 12}) is the <strong>shovel-gated</strong> one - so
+     * falling back here would have swapped a clay softlock for a sand softlock. Preferring a
+     * reachable entry is what makes the fallback an actual escape rather than another dead end.</p>
+     *
+     * <p>Falls through to the previous behaviour when nothing is reachable. That is not expected -
+     * {@code MaterialAccessibilityTest} asserts every biome in {@code biome-unlocks.yml} offers at
+     * least one bare-hand option - but a server with a hand-edited file can still get there, and a
+     * price from the file beats no price at all.</p>
+     */
+    private ItemRequirement selectPrimaryRequirement(List<ItemRequirement> requirements,
+                                                     MaterialAccessibility.ToolClass available) {
+        ItemRequirement firstVanilla = null;
         for (ItemRequirement req : requirements) {
-            if (req instanceof VanillaItemRequirement) {
-                return req;
+            if (req instanceof VanillaItemRequirement vanillaReq) {
+                if (MaterialAccessibility.isReachable(available, vanillaReq.getMaterial())) {
+                    return req;
+                }
+                if (firstVanilla == null) {
+                    firstVanilla = req;
+                }
             }
         }
-        return requirements.get(0);
+        return firstVanilla != null ? firstVanilla : requirements.get(0);
     }
 }

@@ -145,7 +145,7 @@ public class EnhancedStartingChunkService {
                 
                 // A low difficulty score does not mean the start is playable (#105).
                 if (!ChunklockPlugin.getInstance().getChunkEvaluator()
-                        .hasBareHandAccessibleMaterial(chunk)) {
+                        .hasPayableFirstMove(chunk)) {
                     continue;
                 }
 
@@ -205,7 +205,7 @@ public class EnhancedStartingChunkService {
 
                 // A low difficulty score does not mean the start is playable (#105).
                 if (!ChunklockPlugin.getInstance().getChunkEvaluator()
-                        .hasBareHandAccessibleMaterial(chunk)) {
+                        .hasPayableFirstMove(chunk)) {
                     continue;
                 }
 

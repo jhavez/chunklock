@@ -167,8 +167,8 @@ public class StartingChunkService {
                 }
 
                 // A low difficulty score does not mean the neighbourhood is payable (#105).
-                if (!evaluator.hasBareHandAccessibleMaterial(chunk)) {
-                    ChunklockPlugin.getInstance().getLogger().fine("Skipping chunk with nothing gatherable by hand at " + chunk.getX() + "," + chunk.getZ());
+                if (!evaluator.hasPayableFirstMove(chunk)) {
+                    ChunklockPlugin.getInstance().getLogger().fine("Skipping chunk with no payable first move at " + chunk.getX() + "," + chunk.getZ());
                     continue;
                 }
 

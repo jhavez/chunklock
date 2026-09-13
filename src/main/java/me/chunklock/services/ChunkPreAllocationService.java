@@ -181,7 +181,7 @@ public class ChunkPreAllocationService {
 
             // A pre-allocated chunk is handed out as a starting chunk, so it needs the same
             // payable-from-nothing guarantee as a freshly searched one (#105).
-            if (!evaluator.hasBareHandAccessibleMaterial(chunk)) {
+            if (!evaluator.hasPayableFirstMove(chunk)) {
                 return;
             }
             

@@ -552,8 +552,8 @@ public class SingleWorldManager {
             if (!evaluator.isChunkSuitableForSpawning(candidate)) {
                 return false; // Skip water-dominated chunks
             }
-            // And that a player starting here can pay for something (#105).
-            if (!evaluator.hasBareHandAccessibleMaterial(candidate)) {
+            // And that a player starting here can pay for a neighbour (#105).
+            if (!evaluator.hasPayableFirstMove(candidate)) {
                 return false;
             }
         } catch (Exception e) {

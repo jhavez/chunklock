@@ -408,6 +408,76 @@ public class ChunkEvaluator {
     }
 
     /**
+     * Whether a start here offers a payable <em>first move</em> (#105, beach case).
+     *
+     * <h3>Why the starting chunk alone is the wrong question</h3>
+     *
+     * <p>{@link #hasBareHandAccessibleMaterial} asks whether the player's own chunk contains
+     * something gatherable bare-handed. That is necessary but <strong>not sufficient</strong>,
+     * because a player does not pay with their own chunk - they pay to unlock a
+     * <em>neighbour</em>, priced from that neighbour's contents.</p>
+     *
+     * <p>A beach start proved the gap: sand on the surface, dirt a few blocks down - so the
+     * starting chunk passed - while every surrounding chunk priced in clay, which needs a shovel
+     * the treeless biome could not supply. The chunk was fine and the neighbourhood was a
+     * softlock, which is exactly the pair the original check could not distinguish.</p>
+     *
+     * <p>So this asks the question the plan for #105 originally specified: the starting chunk
+     * must be gatherable <em>and</em> at least one of the four orthogonal neighbours must be too.
+     * Diagonals are excluded deliberately - the first unlock is always orthogonal.</p>
+     *
+     * <p><strong>Only inspects chunks that are already loaded.</strong> This runs on the main
+     * thread inside a search over many candidates, and forcing four neighbours to generate per
+     * candidate is the cost that made an earlier full-column scan untenable. An unloaded
+     * neighbour is treated as acceptable, which keeps the check failing <em>open</em>: the
+     * failure mode of rejecting too eagerly is that spawn search finds nowhere to put the
+     * player at all.</p>
+     */
+    public boolean hasPayableFirstMove(Chunk chunk) {
+        try {
+            if (chunk == null || chunk.getWorld() == null) {
+                return true; // Cannot tell; do not block spawning on it.
+            }
+
+            if (!hasBareHandAccessibleMaterial(chunk)) {
+                return false;
+            }
+
+            World world = chunk.getWorld();
+            int[][] offsets = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+
+            boolean sawLoadedNeighbour = false;
+            for (int[] offset : offsets) {
+                int nx = chunk.getX() + offset[0];
+                int nz = chunk.getZ() + offset[1];
+
+                // Deliberately not world.getChunkAt(): that generates the chunk on the spot.
+                if (!world.isChunkLoaded(nx, nz)) {
+                    continue;
+                }
+
+                sawLoadedNeighbour = true;
+                if (hasBareHandAccessibleMaterial(world.getChunkAt(nx, nz))) {
+                    return true;
+                }
+            }
+
+            if (!sawLoadedNeighbour) {
+                // Nothing to judge by. Fail open rather than reject a possibly fine start.
+                return true;
+            }
+
+            logger.fine("Chunk " + chunk.getX() + "," + chunk.getZ()
+                + " is gatherable but no loaded neighbour is - no payable first move (#105)");
+            return false;
+
+        } catch (Exception e) {
+            logger.log(Level.FINE, "Error checking first-move payability", e);
+            return true; // Never block spawning because the check itself failed.
+        }
+    }
+
+    /**
      * Check if a material is water-related (should be avoided for spawning)
      */
     private boolean isWaterRelatedBlock(Material material) {

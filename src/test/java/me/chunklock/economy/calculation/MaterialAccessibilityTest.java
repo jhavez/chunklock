@@ -5,8 +5,14 @@ import org.bukkit.Material;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -116,6 +122,137 @@ class MaterialAccessibilityTest {
         assertTrue(MaterialAccessibility.isReachable(ToolClass.SHOVEL, Material.GRAVEL));
     }
 
+    // ---- biome-unlocks.yml is a second vocabulary ----------------------------------------
+
+    /**
+     * The completeness guarantee, extended to the file biome-based pricing reads (#105, beach).
+     *
+     * <p>Once the biome path is filtered for accessibility, {@code biome-unlocks.yml} becomes a
+     * second source of priceable materials - and a wider one than the scanner, naming mob drops
+     * and crafted goods the scanner never sees. Because {@link MaterialAccessibility#required}
+     * fails closed, an unmapped entry there reads as PICKAXE and drops out of the pool silently.
+     * SEAGRASS was exactly that: unmapped, so a beach would have had both its options rejected
+     * and fallen to the DIRT floor.</p>
+     *
+     * <p><strong>Parses the real file rather than a copied list</strong>, so editing the YAML
+     * without touching the accessibility map fails the build instead of shipping a softlock.</p>
+     */
+    @Test
+    @DisplayName("every material named in biome-unlocks.yml has an explicit tool requirement")
+    void everyBiomeUnlockMaterialIsMapped() throws Exception {
+        List<Material> named = materialsNamedInBiomeUnlocks();
+
+        assertFalse(named.isEmpty(),
+            "precondition: this test is worthless if it parsed nothing - check the resource path");
+
+        List<Material> unmapped = new ArrayList<>();
+        for (Material material : named) {
+            if (!isExplicitlyMapped(material)) {
+                unmapped.add(material);
+            }
+        }
+
+        assertTrue(unmapped.isEmpty(),
+            "biome-based pricing can ask for these, but they have no accessibility entry - so "
+                + "each fails closed to PICKAXE and vanishes from the filtered pool: " + unmapped);
+    }
+
+    /**
+     * The beach case from the #105 live test, stated as the property that failed.
+     *
+     * <p>A beach offers {@code SAND: 20} and {@code SEAGRASS: 12}. Sand is shovel-gated, so if
+     * seagrass were gated too a bare-handed player would have nothing - which is the softlock,
+     * one biome over from the reported icy mountain.</p>
+     */
+    @Test
+    @DisplayName("every biome offers at least one bare-hand gatherable material")
+    void everyBiomeHasABareHandOption() throws Exception {
+        Map<String, List<Material>> byBiome = biomeUnlocksByBiome();
+
+        assertFalse(byBiome.isEmpty(),
+            "precondition: parsed no biomes - check the resource path");
+
+        List<String> unpayable = new ArrayList<>();
+        for (Map.Entry<String, List<Material>> entry : byBiome.entrySet()) {
+            boolean anyFree = entry.getValue().stream().anyMatch(MaterialAccessibility::needsNoTool);
+            if (!anyFree) {
+                unpayable.add(entry.getKey() + " " + entry.getValue());
+            }
+        }
+
+        assertTrue(unpayable.isEmpty(),
+            "a player starting in these biomes has no bare-handed option, so biome-based pricing "
+                + "cannot offer them a first move - this is #105 in another biome: " + unpayable);
+    }
+
+    /** Seagrass by name: the entry whose absence would have sent every beach to the DIRT floor. */
+    @Test
+    @DisplayName("seagrass needs no tool - the beach's only payable option")
+    void seagrassNeedsNoTool() {
+        assertTrue(MaterialAccessibility.needsNoTool(Material.SEAGRASS),
+            "a beach offers only SAND and SEAGRASS; sand is shovel-gated, so if seagrass were "
+                + "gated too the beach start would be the reported clay softlock");
+        assertFalse(MaterialAccessibility.needsNoTool(Material.SAND),
+            "precondition: sand is the gated half of the beach's offering");
+    }
+
+    // ---- Parsing helpers -----------------------------------------------------------------
+
+    /**
+     * Materials named anywhere in {@code biome-unlocks.yml}.
+     *
+     * <p>Deliberately a small regex rather than a YAML library: the file's shape is two levels
+     * of {@code KEY: amount} and reading it literally keeps the test independent of how the
+     * plugin happens to load it. If parsing ever returns nothing the tests above fail loudly on
+     * their precondition rather than passing vacuously.</p>
+     */
+    private static List<Material> materialsNamedInBiomeUnlocks() throws Exception {
+        List<Material> materials = new ArrayList<>();
+        for (List<Material> perBiome : biomeUnlocksByBiome().values()) {
+            for (Material material : perBiome) {
+                if (!materials.contains(material)) {
+                    materials.add(material);
+                }
+            }
+        }
+        return materials;
+    }
+
+    /** The same file, grouped by biome, for the "every biome has an option" property. */
+    private static Map<String, List<Material>> biomeUnlocksByBiome() throws Exception {
+        Path path = Path.of("src", "main", "resources", "biome-unlocks.yml");
+        assertTrue(Files.exists(path), "biome-unlocks.yml not found at " + path.toAbsolutePath());
+
+        Map<String, List<Material>> byBiome = new LinkedHashMap<>();
+        Pattern biomeLine = Pattern.compile("^([A-Z][A-Z0-9_]*):\\s*$");
+        Pattern itemLine = Pattern.compile("^\\s+([A-Z][A-Z0-9_]*):\\s*\\d+\\s*$");
+
+        String current = null;
+        for (String line : Files.readAllLines(path)) {
+            if (line.isBlank() || line.trim().startsWith("#")) {
+                continue;
+            }
+
+            Matcher biome = biomeLine.matcher(line);
+            if (biome.matches()) {
+                current = biome.group(1);
+                byBiome.computeIfAbsent(current, k -> new ArrayList<>());
+                continue;
+            }
+
+            Matcher item = itemLine.matcher(line);
+            if (item.matches() && current != null) {
+                Material material = Material.matchMaterial(item.group(1));
+                // An unrecognised name is the YAML's problem, not this test's - skip rather
+                // than fail, so a typo there does not masquerade as a coverage gap here.
+                if (material != null) {
+                    byBiome.get(current).add(material);
+                }
+            }
+        }
+        return byBiome;
+    }
+
     // ---- Reachability ordering -----------------------------------------------------------
 
     /**
@@ -211,5 +348,14 @@ class MaterialAccessibilityTest {
         Material.REDSTONE_ORE, Material.DEEPSLATE_REDSTONE_ORE,
         Material.DIAMOND_ORE, Material.DEEPSLATE_DIAMOND_ORE,
         Material.EMERALD_ORE, Material.DEEPSLATE_EMERALD_ORE,
-        Material.ANCIENT_DEBRIS);
+        Material.ANCIENT_DEBRIS,
+
+        // Named only by biome-unlocks.yml (#105, beach case). Ice is here because breaking it
+        // bare-handed yields nothing without Silk Touch - "no tool needed to break" and
+        // "gatherable" are different properties, and conflating them is what #105 was.
+        Material.ICE, Material.PACKED_ICE, Material.BLUE_ICE,
+        Material.TERRACOTTA, Material.RED_TERRACOTTA, Material.MOSSY_COBBLESTONE,
+        Material.END_STONE, Material.PURPUR_BLOCK, Material.SCULK,
+        Material.POINTED_DRIPSTONE, Material.BRAIN_CORAL,
+        Material.COAL, Material.COPPER_INGOT, Material.DIAMOND, Material.EMERALD);
 }

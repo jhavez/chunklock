@@ -71,6 +71,9 @@ OLD_GROWTH_SPRUCE_TAIGA:
 WINDSWEPT_HILLS:
   STONE: 40
   EMERALD: 1
+  # Bare-hand option (#105): stone and emerald both need a pickaxe, so without this a player
+  # spawning here has no first move at all. Grass and trees are abundant on these slopes.
+  TALL_GRASS: 16
 
 WINDSWEPT_FOREST:
   OAK_LOG: 20
@@ -79,6 +82,8 @@ WINDSWEPT_FOREST:
 WINDSWEPT_GRAVELLY_HILLS:
   GRAVEL: 48
   FLINT: 8
+  # Bare-hand option (#105): gravel and flint are both shovel work.
+  TALL_GRASS: 16
 
 MEADOW:
   TALL_GRASS: 32
@@ -92,18 +97,28 @@ GROVE:
 SNOWY_SLOPES:
   SNOW_BLOCK: 32
   ICE: 12
+  # Bare-hand option (#105): snow blocks are shovel work and ice yields nothing without Silk
+  # Touch, so this was the reported icy-mountain softlock's own biome entry. Snow layers do
+  # drop snowballs bare-handed, which is the honest escape here.
+  SNOWBALL: 16
 
 JAGGED_PEAKS:
   STONE: 64
   DIAMOND: 2
+  # Bare-hand option (#105): stone and diamond are both pickaxe-gated.
+  SNOWBALL: 24
 
 FROZEN_PEAKS:
   PACKED_ICE: 24
   DIAMOND: 1
+  # Bare-hand option (#105): packed ice needs Silk Touch, diamond needs an iron pickaxe.
+  SNOWBALL: 24
 
 STONY_PEAKS:
   STONE: 48
   COAL: 16
+  # Bare-hand option (#105): stone and coal are both pickaxe-gated.
+  SNOWBALL: 24
 
 # === COLD BIOMES ===
 TAIGA:
@@ -121,6 +136,8 @@ SNOWY_PLAINS:
 ICE_SPIKES:
   PACKED_ICE: 32
   BLUE_ICE: 4
+  # Bare-hand option (#105): every ice variant needs Silk Touch to yield anything.
+  SNOWBALL: 32
 
 FROZEN_RIVER:
   ICE: 24
@@ -151,6 +168,8 @@ BEACH:
 STONY_SHORE:
   STONE: 32
   GRAVEL: 24
+  # Bare-hand option (#105): stone needs a pickaxe, gravel a shovel. A shore always has water.
+  SEAGRASS: 16
 
 # === WARM/DRY BIOMES ===
 DESERT:
@@ -172,6 +191,9 @@ WINDSWEPT_SAVANNA:
 BADLANDS:
   RED_SAND: 32
   TERRACOTTA: 16
+  # Bare-hand option (#105): red sand is shovel work, terracotta needs a pickaxe. Dead bushes
+  # and cacti are what badlands actually offer a bare-handed player.
+  CACTUS: 8
 
 WOODED_BADLANDS:
   RED_SAND: 24
@@ -181,6 +203,8 @@ WOODED_BADLANDS:
 ERODED_BADLANDS:
   RED_SAND: 40
   RED_TERRACOTTA: 20
+  # Bare-hand option (#105): same gating as BADLANDS.
+  CACTUS: 8
 
 # === LUSH BIOMES ===
 JUNGLE:
@@ -245,6 +269,9 @@ MUSHROOM_FIELDS:
 DRIPSTONE_CAVES:
   POINTED_DRIPSTONE: 24
   COPPER_INGOT: 8
+  # Bare-hand option (#105): dripstone needs a pickaxe and copper needs mining plus smelting.
+  # Glow berries grow on cave vines throughout this biome and are pickable by hand.
+  GLOW_BERRIES: 12
 
 DEEP_DARK:
   SCULK: 32
@@ -298,4 +325,8 @@ END_HIGHLANDS:
 END_BARRENS:
   END_STONE: 40
   PURPUR_BLOCK: 8
+  # Bare-hand option (#105): both are pickaxe-gated. Chorus fruit is hand-pickable, and any
+  # player who has reached the End has tools anyway - this keeps the invariant total rather
+  # than carving out exceptions the next biome added will forget.
+  CHORUS_FRUIT: 8
 
